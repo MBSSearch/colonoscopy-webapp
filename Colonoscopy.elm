@@ -1,8 +1,9 @@
 import Html exposing (..)
 import Html.Events exposing (..)
+import Http exposing (get, send)
 import Json.Decode exposing (Decoder, decodeString, list, string)
 import Json.Decode.Pipeline exposing (decode, required)
-import Task
+import Result exposing (mapError)
 
 -- In the future we'll want only the list from JSON generation, and management
 -- to be in Elm, the rest should be in a template file. Plain HTML? Pug?
@@ -19,34 +20,35 @@ main =
 type Model
   = Empty
   | Loading
-  | Loaded (Result String QuestionTree)
+  | Loaded (Result Http.Error QuestionTree)
 
 init : (Model, Cmd Msg)
-init = (Empty, Cmd.none)
+init = (Loading, getJSON)
+
+getJSON : Cmd Msg
+getJSON =
+  let
+      url = "https://s3-ap-southeast-2.amazonaws.com/static.mbssearch.com/colonoscopy_decision_tree_demo.json"
+
+      request =
+        Http.get url questionTreeDecoder
+  in
+      Http.send NewJSON request
 
 -- Update
 
 type Msg
   = Load
-  | Succeed QuestionTree
-  | Fail String
+  | NewJSON (Result Http.Error QuestionTree)
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
   case msg of
-    Load ->
-      Loading
-      |> update (processQuestionTreeJSON (decodeString (questionTreeDecoder) json))
+    Load -> (Loading, getJSON)
 
-    Succeed tree -> (Loaded (Ok tree), Cmd.none)
+    NewJSON (Ok tree) -> (Loaded (Ok tree), Cmd.none)
 
-    Fail error -> (Loaded (Err error), Cmd.none)
-
-processQuestionTreeJSON : Result String QuestionTree -> Msg
-processQuestionTreeJSON result =
-  case result of
-    Ok tree -> Succeed tree
-    Err error -> Fail error
+    NewJSON (Err error) -> (Loaded (Err error), Cmd.none)
 
 -- View
 
@@ -64,7 +66,7 @@ view model =
     Loaded (Err error) ->
       div [] [
         h3 [] [text "Error"]
-        , p [] [text error]
+        , p [] [text (toString error)]
       ]
 
 toHTML : QuestionTree -> Html Msg
@@ -95,18 +97,3 @@ questionTreeDecoder : Decoder QuestionTree
 questionTreeDecoder =
   decode QuestionTree
     |> required "root" (questionDecoder)
-
-json : String
-json = """
-{
-  "root": {
-    "text": "Question",
-    "answers": [
-      "Answer A",
-      "Answer B",
-      "Answer C"
-    ]
-  }
-}
-"""
-
