@@ -24,15 +24,8 @@ type Model
 
 type alias LoadedModel =
   { tree: QuestionTree
-  , currentNode: Maybe (Either ItemNumber Question)
+  , currentNode: Either ItemNumber Question
   }
-
-getNodeToShow : LoadedModel -> Either ItemNumber Question
-getNodeToShow model =
-  case model.currentNode of
-    Nothing -> Either.Right model.tree.root
-
-    Just either -> either
 
 init : (Model, Cmd Msg)
 init = (Loading, getJSON)
@@ -59,7 +52,7 @@ update msg model =
   case msg of
     Load -> (Loading, getJSON)
 
-    NewJSON (Ok tree) -> (Loaded (Ok { tree = tree, currentNode = Nothing }), Cmd.none)
+    NewJSON (Ok tree) -> (Loaded (Ok { tree = tree, currentNode = (Either.Right tree.root) }), Cmd.none)
 
     NewJSON (Err error) -> (Loaded (Err error), Cmd.none)
 
@@ -72,26 +65,28 @@ update msg model =
 
 updateWithSelectedAnswerIndex : Int -> LoadedModel -> LoadedModel
 updateWithSelectedAnswerIndex index model =
-  { tree = model.tree
-  , currentNode = t model.tree model.currentNode index
-  }
-
-t : QuestionTree -> Maybe (Either ItemNumber Question) -> Int -> Maybe (Either ItemNumber Question)
-t tree current index =
-  case current of
-    -- If the current node is an `ItemNumber` then we are at the end of the
-    -- tree, and there's nothing left to select. This is a case in which we
-    -- should never end up.
-    Just (Either.Left item) ->
-      current
-
-    -- If there's no current node yet then are at the beginning of the decision
-    -- tree, and should use the root to pick the next node
+  case getAnswer index model.currentNode of
+    -- The given index did not match any of the answer in the current node.
+    -- This is a case in which we should never end up.
     Nothing ->
-      Maybe.map (\a -> a.next) (get tree.root.answers index)
+      model
 
-    Just (Either.Right question) ->
-      Maybe.map (\a -> a.next) (get question.answers index)
+    Just nextQuestionOrItem ->
+      { tree = model.tree
+      , currentNode = nextQuestionOrItem
+      }
+
+getAnswer : Int -> Either ItemNumber Question -> Maybe (Either ItemNumber Question)
+getAnswer index node =
+  case node of
+    -- If the node is an `ItemNumber` then we are at the end of the tree, and
+    -- there's nothing left to select. This is a case in which we should never
+    -- end up.
+    Either.Left item ->
+      Nothing
+
+    Either.Right question ->
+      Maybe.map (\a -> a.next) <| get question.answers index
 
 -- View
 
