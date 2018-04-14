@@ -1,9 +1,11 @@
+import Array exposing (..)
 import Either exposing (Either)
 import Either.Decode exposing (either)
 import Html exposing (..)
+import Html.Attributes exposing (href)
 import Html.Events exposing (..)
 import Http exposing (get, send)
-import Json.Decode exposing (Decoder, decodeString, lazy, list, int, map, oneOf, string)
+import Json.Decode exposing (Decoder, array, decodeString, lazy, int, map, oneOf, string)
 import Json.Decode.Pipeline exposing (decode, required)
 
 main =
@@ -18,7 +20,19 @@ main =
 
 type Model
   = Loading
-  | Loaded (Result Http.Error QuestionTree)
+  | Loaded (Result Http.Error LoadedModel)
+
+type alias LoadedModel =
+  { tree: QuestionTree
+  , currentNode: Maybe (Either ItemNumber Question)
+  }
+
+getNodeToShow : LoadedModel -> Either ItemNumber Question
+getNodeToShow model =
+  case model.currentNode of
+    Nothing -> Either.Right model.tree.root
+
+    Just either -> either
 
 init : (Model, Cmd Msg)
 init = (Loading, getJSON)
@@ -38,15 +52,46 @@ getJSON =
 type Msg
   = Load
   | NewJSON (Result Http.Error QuestionTree)
+  | SelectAnswer Int
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
   case msg of
     Load -> (Loading, getJSON)
 
-    NewJSON (Ok tree) -> (Loaded (Ok tree), Cmd.none)
+    NewJSON (Ok tree) -> (Loaded (Ok { tree = tree, currentNode = Nothing }), Cmd.none)
 
     NewJSON (Err error) -> (Loaded (Err error), Cmd.none)
+
+    SelectAnswer index ->
+      case model of
+        Loaded (Ok loadedModel) ->
+          (Loaded (Ok (updateWithSelectedAnswerIndex index loadedModel)), Cmd.none)
+
+        _ -> (model, Cmd.none)
+
+updateWithSelectedAnswerIndex : Int -> LoadedModel -> LoadedModel
+updateWithSelectedAnswerIndex index model =
+  { tree = model.tree
+  , currentNode = t model.tree model.currentNode index
+  }
+
+t : QuestionTree -> Maybe (Either ItemNumber Question) -> Int -> Maybe (Either ItemNumber Question)
+t tree current index =
+  case current of
+    -- If the current node is an `ItemNumber` then we are at the end of the
+    -- tree, and there's nothing left to select. This is a case in which we
+    -- should never end up.
+    Just (Either.Left item) ->
+      current
+
+    -- If there's no current node yet then are at the beginning of the decision
+    -- tree, and should use the root to pick the next node
+    Nothing ->
+      Maybe.map (\a -> a.next) (get tree.root.answers index)
+
+    Just (Either.Right question) ->
+      Maybe.map (\a -> a.next) (get question.answers index)
 
 -- View
 
@@ -56,22 +101,33 @@ view model =
     Loading ->
       p [] [text "Loading..."]
 
-    Loaded (Ok tree) -> (toHTML tree)
+    Loaded (Ok loadedModel) -> (toHTML <| getNodeToShow loadedModel)
 
     Loaded (Err error) ->
       div [] [
         h3 [] [text "Error"]
-        , p [] [text (toString error)]
+        , p [] [text <| toString error]
       ]
 
-toHTML : QuestionTree -> Html Msg
-toHTML tree =
+toHTML : Either ItemNumber Question -> Html Msg
+toHTML itemOrQuestion =
+  case itemOrQuestion of
+    Either.Left itemNumber ->
+      div []
+        [ h1 [] [text "Colonoscopy"]
+        , h2 [] [text <| toString itemNumber.number]
+        ]
+
+    Either.Right question ->
+      questionToHTML question
+
+questionToHTML : Question -> Html Msg
+questionToHTML question =
   div []
   [ h1 [] [text "Colonoscopy"]
-  , h2 [] [text tree.root.text]
-  , ul [] (map (\answer -> li [] [text answer.text]) tree.root.answers)
+  , h2 [] [text question.text]
+  , ul [] (toList (indexedMap (\index answer -> li [] [a [href "#", onClick (SelectAnswer index)] [text answer.text]]) question.answers))
   ]
-
 
 -- Types
 
@@ -116,14 +172,21 @@ type alias Question =
 -- The opaque type `Answers` allows us to _hide_ the recursion of nested
 -- questions in a question's answer.
 -- See https://github.com/elm-lang/elm-compiler/blob/0.18.0/hints/recursive-alias.md
-type Answers = Answers (List Answer)
+type Answers = Answers (Array Answer)
 
 -- Because `Answers` hides `List Answer` from the rest of the code, in order to
 -- `map` on the list we need implement our own function.
 -- See this post for more info on implementing functions for opaque types:
 -- https://medium.com/@ghivert/designing-api-in-elm-opaque-types-ce9d5f113033
-map : (Answer -> a) -> Answers -> List a
-map f (Answers l) = List.map f l
+map : (Answer -> a) -> Answers -> Array a
+map f (Answers l) = Array.map f l
+
+indexedMap : (Int -> Answer -> a) -> Answers -> Array a
+indexedMap f (Answers l) = Array.indexedMap f l
+
+get : Answers -> Int -> Maybe Answer
+get (Answers a) index =
+  Array.get index a
 
 type alias Answer =
   { text : String
@@ -176,7 +239,7 @@ question : Decoder Question
 question =
   decode Question
     |> required "text" string
-    |> required "answers" (Json.Decode.map Answers (list <| lazy (\_ -> answer)))
+    |> required "answers" (Json.Decode.map Answers (array <| lazy (\_ -> answer)))
 
 answer : Decoder Answer
 answer =
