@@ -17,8 +17,7 @@ main =
 -- Model
 
 type Model
-  = Empty
-  | Loading
+  = Loading
   | Loaded (Result Http.Error QuestionTree)
 
 init : (Model, Cmd Msg)
@@ -54,9 +53,6 @@ update msg model =
 view : Model -> Html Msg
 view model =
   case model of
-    Empty ->
-      button [onClick Load] [text "Load"]
-
     Loading ->
       p [] [text "Loading..."]
 
