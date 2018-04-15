@@ -25,7 +25,16 @@ type Model
 type alias LoadedModel =
   { tree: QuestionTree
   , currentNode: Either ItemNumber Question
+  , nodesHistory: Array (Either ItemNumber Question)
   }
+
+pop : Array a -> Array a
+pop array =
+  slice 0 -1 array
+
+getLast : Array a -> Maybe a
+getLast array =
+  Array.get (length array - 1) array
 
 init : (Model, Cmd Msg)
 init = (Loading, getJSON)
@@ -46,15 +55,19 @@ type Msg
   = Load
   | NewJSON (Result Http.Error QuestionTree)
   | SelectAnswer Int
+  | GoBack
 
 update : Msg -> Model -> (Model, Cmd Msg)
 update msg model =
   case msg of
-    Load -> (Loading, getJSON)
+    Load ->
+      (Loading, getJSON)
 
-    NewJSON (Ok tree) -> (Loaded (Ok { tree = tree, currentNode = (Either.Right tree.root) }), Cmd.none)
+    NewJSON (Ok tree) ->
+      (Loaded (Ok { tree = tree, currentNode = (Either.Right tree.root), nodesHistory = fromList [] }), Cmd.none)
 
-    NewJSON (Err error) -> (Loaded (Err error), Cmd.none)
+    NewJSON (Err error) ->
+      (Loaded (Err error), Cmd.none)
 
     SelectAnswer index ->
       case model of
@@ -62,6 +75,23 @@ update msg model =
           (Loaded (Ok (updateWithSelectedAnswerIndex index loadedModel)), Cmd.none)
 
         _ -> (model, Cmd.none)
+
+    GoBack ->
+      case model of
+        Loaded (Ok loadedModel) ->
+          case getLast loadedModel.nodesHistory of
+            Just previousNode ->
+              (Loaded (Ok { tree = loadedModel.tree, currentNode = previousNode, nodesHistory = pop loadedModel.nodesHistory }), Cmd.none)
+
+            Nothing ->
+              -- Previous history was empty. This is a case in which we should
+              -- never end up.
+              (model, Cmd.none)
+
+        _ ->
+          -- We should never end up in this state, a `GoBack` message should be
+          -- sent only from the state describe above.
+          (model, Cmd.none)
 
 updateWithSelectedAnswerIndex : Int -> LoadedModel -> LoadedModel
 updateWithSelectedAnswerIndex index model =
@@ -74,6 +104,7 @@ updateWithSelectedAnswerIndex index model =
     Just nextQuestionOrItem ->
       { tree = model.tree
       , currentNode = nextQuestionOrItem
+      , nodesHistory = append model.nodesHistory (fromList [model.currentNode])
       }
 
 getAnswer : Int -> Either ItemNumber Question -> Maybe (Either ItemNumber Question)
@@ -96,7 +127,12 @@ view model =
     Loading ->
       p [] [text "Loading..."]
 
-    Loaded (Ok loadedModel) -> (toHTML <| getNodeToShow loadedModel)
+    Loaded (Ok loadedModel) ->
+      div []
+        [ h1 [] [text "Colonoscopy"]
+        , backButtonIfNeeded loadedModel.nodesHistory
+        , toHTML loadedModel.currentNode
+        ]
 
     Loaded (Err error) ->
       div [] [
@@ -104,14 +140,19 @@ view model =
         , p [] [text <| toString error]
       ]
 
+backButtonIfNeeded : Array a -> Html Msg
+backButtonIfNeeded array =
+  case getLast array of
+    Nothing -> span [] []
+
+    Just _ ->
+        a [href "#", onClick GoBack] [text "Back"]
+
 toHTML : Either ItemNumber Question -> Html Msg
 toHTML itemOrQuestion =
   case itemOrQuestion of
     Either.Left itemNumber ->
-      div []
-        [ h1 [] [text "Colonoscopy"]
-        , h2 [] [text <| toString itemNumber.number]
-        ]
+      h2 [] [text <| toString itemNumber.number]
 
     Either.Right question ->
       questionToHTML question
@@ -119,9 +160,8 @@ toHTML itemOrQuestion =
 questionToHTML : Question -> Html Msg
 questionToHTML question =
   div []
-  [ h1 [] [text "Colonoscopy"]
-  , h2 [] [text question.text]
-  , ul [] (toList (indexedMap (\index answer -> li [] [a [href "#", onClick (SelectAnswer index)] [text answer.text]]) question.answers))
+  [ h2 [] [text question.text]
+  , ul [] (toList <| indexedMap (\index answer -> li [] [a [href "#", onClick (SelectAnswer index)] [text answer.text]]) question.answers)
   ]
 
 -- Types
@@ -169,7 +209,7 @@ type alias Question =
 -- See https://github.com/elm-lang/elm-compiler/blob/0.18.0/hints/recursive-alias.md
 type Answers = Answers (Array Answer)
 
--- Because `Answers` hides `List Answer` from the rest of the code, in order to
+-- Because `Answers` hides `Array Answer` from the rest of the code, in order to
 -- `map` on the list we need implement our own function.
 -- See this post for more info on implementing functions for opaque types:
 -- https://medium.com/@ghivert/designing-api-in-elm-opaque-types-ce9d5f113033
