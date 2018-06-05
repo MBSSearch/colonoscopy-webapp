@@ -2,7 +2,7 @@ import Array exposing (..)
 import Either exposing (Either)
 import Either.Decode exposing (either)
 import Html exposing (..)
-import Html.Attributes exposing (href)
+import Html.Attributes exposing (class, href)
 import Html.Events exposing (..)
 import Http exposing (get, send)
 import Json.Decode exposing (Decoder, array, decodeString, lazy, int, map, oneOf, string)
@@ -161,7 +161,10 @@ questionToHTML : Question -> Html Msg
 questionToHTML question =
   div []
   [ h2 [] [text question.text]
-  , ul [] (toList <| indexedMap (\index answer -> li [] [a [href "#", onClick (SelectAnswer index)] [text answer.text]]) question.answers)
+  -- Look, I don't know how I feel about leaking CSS in here... Apparently
+  -- that's what "components" are all about, still.
+  , ul [class "list-group"] (toList <| indexedMap (\index answer -> li [class "list-group-item"] [a [href "#", onClick
+  (SelectAnswer index)] [text answer.text]]) question.answers)
   ]
 
 -- Types
